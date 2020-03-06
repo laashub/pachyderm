@@ -904,24 +904,25 @@ func (a *APIServer) egress(pachClient *client.APIClient, logger *taggedLogger, j
 	})
 }
 
-func (a *APIServer) receiveSpout(ctx context.Context, logger *taggedLogger) error {
+func (a *APIServer) receiveSpout(ctx context.Context, logger *taggedLogger) (retErr1 error) {
 	return backoff.RetryNotify(func() error {
 		repo := a.pipelineInfo.Pipeline.Name
+		// open a read connection to the /pfs/out named pipe
+		out, err := os.Open("/pfs/out")
+		if err != nil {
+			return err
+		}
+		// and close it when we're done
+		defer func() {
+			if err := out.Close(); err != nil && retErr1 == nil {
+				// this lets us pass the error through if Close fails
+				retErr1 = err
+			}
+		}()
 		for {
-			// this extra closure is so that we can scope the defer
-			if err := func() (retErr error) {
-				// open a read connection to the /pfs/out named pipe
-				out, err := os.Open("/pfs/out")
-				if err != nil {
-					return err
-				}
-				// and close it at the end of each loop
-				defer func() {
-					if err := out.Close(); err != nil && retErr == nil {
-						// this lets us pass the error through if Close fails
-						retErr = err
-					}
-				}()
+			// this extra closure is so that we can scope the defer for FinishCommit
+			if err := func() (retErr2 error) {
+				// create a new tar reader
 				outTar := tar.NewReader(out)
 
 				// start commit
@@ -936,9 +937,9 @@ func (a *APIServer) receiveSpout(ctx context.Context, logger *taggedLogger) erro
 
 				// finish the commit even if there was an issue
 				defer func() {
-					if err := a.pachClient.FinishCommit(repo, commit.ID); err != nil && retErr == nil {
+					if err := a.pachClient.FinishCommit(repo, commit.ID); err != nil && retErr2 == nil {
 						// this lets us pass the error through if FinishCommit fails
-						retErr = err
+						retErr2 = err
 					}
 				}()
 				// this loops through all the files in the tar that we've read from /pfs/out
