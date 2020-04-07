@@ -946,6 +946,16 @@ func (a *APIServer) receiveSpout(ctx context.Context, logger *taggedLogger) (ret
 				for {
 					fileHeader, err := outTar.Next()
 					if err == io.EOF {
+						// at the end of file, we open the pipe again, since this blocks until something is written to the pipe
+						openAndWait, err := os.Open("/pfs/out")
+						if err != nil {
+							return err
+						}
+						// and then we immediately close this reader of the pipe, so that the main reader can continue its standard behavior
+						err = openAndWait.Close()
+						if err != nil {
+							return err
+						}
 						break
 					}
 					if err != nil {
