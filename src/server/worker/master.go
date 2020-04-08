@@ -255,16 +255,14 @@ func (a *APIServer) spoutSpawner(pachClient *client.APIClient) error {
 
 	var dir string
 
-	headCommitInfo, err := pachClient.InspectCommit(a.pipelineInfo.Pipeline.Name, a.pipelineInfo.OutputBranch)
-	if err != nil && !errutil.IsNotFoundError(err) && !pfsserver.IsNoHeadErr(err) {
-		return errors.Wrapf(err, "pachClient.InspectCommit")
-	}
-	if headCommitInfo != nil && headCommitInfo.Finished == nil {
-		err = pachClient.DeleteCommit(a.pipelineInfo.Pipeline.Name, a.pipelineInfo.OutputBranch)
-		if err != nil {
-			return errors.Wrapf(err, "pachClient.DeleteCommit")
+	// 10 to be safe
+	pachClient.ListCommitF(a.pipelineInfo.Pipeline.Name, "", "", 10, false, func(c *pfs.CommitInfo) error {
+		if c.Finished != nil {
+			return nil
 		}
-	}
+
+		return pachClient.DeleteCommit(a.pipelineInfo.Pipeline.Name, c.Commit.ID)
+	})
 
 	logger, err := a.getTaggedLogger(pachClient, "spout", nil, false)
 	if err != nil {
